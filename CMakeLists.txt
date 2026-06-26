@@ -18,7 +18,10 @@ add_executable(WaveRender
     src/Engine/Renderer/Renderer.hpp
     src/Engine/Renderer/RenderTypes.hpp
 
+    src/Engine/Platform/Window.cpp
     src/Engine/Platform/Window.hpp
+    src/Engine/Platform/Win32/Win32Window.cpp
+    src/Engine/Platform/Win32/Win32Window.hpp
 )
 
 target_include_directories(WaveRender PRIVATE
@@ -30,6 +33,10 @@ target_compile_definitions(WaveRender PRIVATE
     NOMINMAX
     UNICODE
     _UNICODE
+)
+
+target_link_libraries(WaveRender PRIVATE
+    user32
 )
 
 if(MSVC)
