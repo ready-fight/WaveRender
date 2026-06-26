@@ -1,6 +1,7 @@
 #include "Application.hpp"
 
 #include "Engine/Core/Log.hpp"
+#include "Engine/Renderer/RenderTypes.hpp"
 
 namespace Wave
 {
@@ -14,6 +15,13 @@ namespace Wave
         windowDesc.Title = L"WaveRender";
 
         m_Window = Window::Create(windowDesc);
+
+        RenderSettings renderSettings = {};
+        renderSettings.BackBufferWidth = windowDesc.Width;
+        renderSettings.BackBufferHeight = windowDesc.Height;
+        renderSettings.EnableValidation = true;
+
+        m_Renderer = Renderer::Create(*m_Window, renderSettings);
     }
 
     Application::~Application()
@@ -32,7 +40,11 @@ namespace Wave
             if (m_Window->ShouldClose())
             {
                 m_IsRunning = false;
+                break;
             }
+
+            m_Renderer->BeginFrame();
+            m_Renderer->EndFrame();
         }
 
         Log::Info("Main loop ended.");

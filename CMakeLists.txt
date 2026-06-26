@@ -15,8 +15,12 @@ add_executable(WaveRender
     src/Engine/Core/Log.hpp
     src/Engine/Core/Types.hpp
 
+    src/Engine/Renderer/Renderer.cpp
     src/Engine/Renderer/Renderer.hpp
     src/Engine/Renderer/RenderTypes.hpp
+    src/Engine/Renderer/D3D12/D3D12Common.hpp
+    src/Engine/Renderer/D3D12/D3D12Renderer.cpp
+    src/Engine/Renderer/D3D12/D3D12Renderer.hpp
 
     src/Engine/Platform/Window.cpp
     src/Engine/Platform/Window.hpp
@@ -37,6 +41,9 @@ target_compile_definitions(WaveRender PRIVATE
 
 target_link_libraries(WaveRender PRIVATE
     user32
+    d3d12
+    dxgi
+    dxguid
 )
 
 if(MSVC)
