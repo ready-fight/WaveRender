@@ -34,31 +34,26 @@ namespace Wave
 
     void D3D12Renderer::BeginFrame()
     {
-        ThrowIfFailed(
-            m_CommandAllocators[m_FrameIndex]->Reset(),
-            "Failed to reset command allocator.");
+        m_GraphicsContext.Reset(m_FrameIndex);
 
-        ThrowIfFailed(
-            m_CommandList->Reset(m_CommandAllocators[m_FrameIndex].Get(), nullptr),
-            "Failed to reset command list.");
-
-        TransitionCurrentBackBuffer(D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        TransitionCurrentBackBuffer(D3D12_RESOURCE_STATE_RENDER_TARGET);
 
         const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentBackBufferRtv();
+        ID3D12GraphicsCommandList* commandList = m_GraphicsContext.GetCommandList();
 
-        m_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
         const float clearColor[] = {0.04f, 0.06f, 0.10f, 1.0f};
-        m_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+        commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
     }
 
     void D3D12Renderer::EndFrame()
     {
-        TransitionCurrentBackBuffer(D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+        TransitionCurrentBackBuffer(D3D12_RESOURCE_STATE_PRESENT);
 
-        ThrowIfFailed(m_CommandList->Close(), "Failed to close command list.");
+        m_GraphicsContext.Close();
 
-        ID3D12CommandList* commandLists[] = {m_CommandList.Get()};
+        ID3D12CommandList* commandLists[] = {m_GraphicsContext.GetCommandList()};
         m_GraphicsQueue->ExecuteCommandLists(1, commandLists);
 
         ThrowIfFailed(m_SwapChain->Present(1, 0), "Failed to present swap chain.");
@@ -132,7 +127,7 @@ namespace Wave
         swapChainDesc.SampleDesc.Count = 1;
         swapChainDesc.SampleDesc.Quality = 0;
         swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        swapChainDesc.BufferCount = FrameCount;
+        swapChainDesc.BufferCount = SwapChainBufferCount;
         swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
         swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
@@ -161,51 +156,44 @@ namespace Wave
 
     void D3D12Renderer::CreateRenderTargets()
     {
-        D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-        heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-        heapDesc.NumDescriptors = FrameCount;
-        heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        heapDesc.NodeMask = 0;
+        m_RtvAllocator.Initialize(
+            m_Device.Get(),
+            D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+            SwapChainBufferCount);
 
-        ThrowIfFailed(
-            m_Device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_RtvHeap)),
-            "Failed to create RTV descriptor heap.");
-
-        m_RtvDescriptorSize = m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
-        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
-
-        for (u32 i = 0; i < FrameCount; ++i)
+        for (u32 i = 0; i < SwapChainBufferCount; ++i)
         {
+            Microsoft::WRL::ComPtr<ID3D12Resource> backBuffer;
+
             ThrowIfFailed(
-                m_SwapChain->GetBuffer(i, IID_PPV_ARGS(&m_BackBuffers[i])),
+                m_SwapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer)),
                 "Failed to get swap chain back buffer.");
 
-            m_Device->CreateRenderTargetView(m_BackBuffers[i].Get(), nullptr, rtvHandle);
+            GpuResourceDesc resourceDesc = {};
+            resourceDesc.Usage = ResourceUsage::BackBuffer;
+            resourceDesc.DebugName = L"WaveRender Back Buffer";
 
-            rtvHandle.ptr += m_RtvDescriptorSize;
+            m_BackBuffers[i].Attach(
+                backBuffer,
+                D3D12_RESOURCE_STATE_PRESENT,
+                resourceDesc);
+
+            m_BackBufferRtvs[i] = m_RtvAllocator.Allocate();
+
+            m_Device->CreateRenderTargetView(
+                m_BackBuffers[i].Get(),
+                nullptr,
+                m_BackBufferRtvs[i].CpuHandle);
         }
     }
 
     void D3D12Renderer::CreateCommandObjects()
     {
-        for (u32 i = 0; i < FrameCount; ++i)
-        {
-            ThrowIfFailed(
-                m_Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_CommandAllocators[i])),
-                "Failed to create command allocator.");
-        }
-
-        ThrowIfFailed(
-            m_Device->CreateCommandList(
-                0,
-                D3D12_COMMAND_LIST_TYPE_DIRECT,
-                m_CommandAllocators[m_FrameIndex].Get(),
-                nullptr,
-                IID_PPV_ARGS(&m_CommandList)),
-            "Failed to create command list.");
-
-        ThrowIfFailed(m_CommandList->Close(), "Failed to close initial command list.");
+        m_GraphicsContext.Initialize(
+            m_Device.Get(),
+            D3D12_COMMAND_LIST_TYPE_DIRECT,
+            SwapChainBufferCount,
+            L"WaveRender Graphics Command List");
     }
 
     void D3D12Renderer::CreateSyncObjects()
@@ -254,24 +242,16 @@ namespace Wave
 
     D3D12_CPU_DESCRIPTOR_HANDLE D3D12Renderer::GetCurrentBackBufferRtv() const
     {
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
-        handle.ptr += static_cast<SIZE_T>(m_FrameIndex) * static_cast<SIZE_T>(m_RtvDescriptorSize);
-        return handle;
+        return m_BackBufferRtvs[m_FrameIndex].CpuHandle;
     }
 
-    void D3D12Renderer::TransitionCurrentBackBuffer(
-        D3D12_RESOURCE_STATES before,
-        D3D12_RESOURCE_STATES after)
+    void D3D12Renderer::TransitionCurrentBackBuffer(D3D12_RESOURCE_STATES after)
     {
-        D3D12_RESOURCE_BARRIER barrier = {};
-        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        barrier.Transition.pResource = m_BackBuffers[m_FrameIndex].Get();
-        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        barrier.Transition.StateBefore = before;
-        barrier.Transition.StateAfter = after;
+        D3D12GpuResource& backBuffer = m_BackBuffers[m_FrameIndex];
+        const D3D12_RESOURCE_STATES before = backBuffer.GetState();
 
-        m_CommandList->ResourceBarrier(1, &barrier);
+        m_GraphicsContext.TransitionResource(backBuffer.Get(), before, after);
+        backBuffer.SetState(after);
     }
 
     void D3D12Renderer::MoveToNextFrame()

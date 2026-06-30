@@ -4,6 +4,8 @@
 
 namespace Wave
 {
+    inline constexpr u32 SwapChainBufferCount = 2;
+
     enum class GraphicsBackend : u8
     {
         D3D12
