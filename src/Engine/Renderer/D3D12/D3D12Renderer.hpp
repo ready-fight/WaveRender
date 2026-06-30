@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Renderer/D3D12/D3D12Buffer.hpp"
 #include "Engine/Renderer/D3D12/D3D12CommandContext.hpp"
 #include "Engine/Renderer/D3D12/D3D12DescriptorAllocator.hpp"
 #include "Engine/Renderer/D3D12/D3D12GpuResource.hpp"
@@ -27,6 +28,7 @@ namespace Wave
         void CreatePipelineObjects();
         void CreateCommandObjects();
         void CreateSyncObjects();
+        void CreateSceneResources();
 
         Microsoft::WRL::ComPtr<IDXGIAdapter1> SelectHardwareAdapter() const;
 
@@ -51,6 +53,10 @@ namespace Wave
 
         Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RootSignature;
         Microsoft::WRL::ComPtr<ID3D12PipelineState> m_PipelineState;
+
+        D3D12Buffer m_TriangleVertexBuffer;
+        D3D12Buffer m_TriangleVertexUploadBuffer;
+        D3D12_VERTEX_BUFFER_VIEW m_TriangleVertexBufferView = {};
 
         D3D12_VIEWPORT m_Viewport = {};
         D3D12_RECT m_ScissorRect = {};

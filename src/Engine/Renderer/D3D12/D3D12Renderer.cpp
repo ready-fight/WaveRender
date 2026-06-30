@@ -1,3 +1,5 @@
+#include <cstddef>
+
 #include "D3D12Renderer.hpp"
 
 #include "Engine/Core/FileSystem.hpp"
@@ -10,11 +12,19 @@
 #define WAVE_SHADER_DIR "shaders"
 #endif
 
+namespace
+{
+    struct TriangleVertex
+    {
+        float Position[3];
+        float Color[3];
+    };
+} // namespace
+
 namespace Wave
 {
-    D3D12Renderer::D3D12Renderer(Window& window, const RenderSettings& settings)
-        : m_Window(window)
-        , m_Settings(settings)
+    D3D12Renderer::D3D12Renderer(Window &window, const RenderSettings &settings)
+        : m_Window(window), m_Settings(settings)
     {
         CreateFactory();
         CreateDevice();
@@ -24,6 +34,7 @@ namespace Wave
         CreatePipelineObjects();
         CreateCommandObjects();
         CreateSyncObjects();
+        CreateSceneResources();
 
         Log::Info("D3D12 renderer initialized.");
     }
@@ -48,7 +59,7 @@ namespace Wave
         TransitionCurrentBackBuffer(D3D12_RESOURCE_STATE_RENDER_TARGET);
 
         const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentBackBufferRtv();
-        ID3D12GraphicsCommandList* commandList = m_GraphicsContext.GetCommandList();
+        ID3D12GraphicsCommandList *commandList = m_GraphicsContext.GetCommandList();
 
         commandList->RSSetViewports(1, &m_Viewport);
         commandList->RSSetScissorRects(1, &m_ScissorRect);
@@ -60,6 +71,7 @@ namespace Wave
 
         commandList->SetGraphicsRootSignature(m_RootSignature.Get());
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        commandList->IASetVertexBuffers(0, 1, &m_TriangleVertexBufferView);
         commandList->DrawInstanced(3, 1, 0, 0);
     }
 
@@ -69,7 +81,7 @@ namespace Wave
 
         m_GraphicsContext.Close();
 
-        ID3D12CommandList* commandLists[] = {m_GraphicsContext.GetCommandList()};
+        ID3D12CommandList *commandLists[] = {m_GraphicsContext.GetCommandList()};
         m_GraphicsQueue->ExecuteCommandLists(1, commandLists);
 
         ThrowIfFailed(m_SwapChain->Present(1, 0), "Failed to present swap chain.");
@@ -111,9 +123,8 @@ namespace Wave
     {
         Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter = SelectHardwareAdapter();
 
-        ThrowIfFailed(
-            D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_Device)),
-            "Failed to create D3D12 device.");
+        ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_Device)),
+                      "Failed to create D3D12 device.");
 
         m_Device->SetName(L"WaveRender D3D12 Device");
     }
@@ -126,9 +137,8 @@ namespace Wave
         queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
         queueDesc.NodeMask = 0;
 
-        ThrowIfFailed(
-            m_Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_GraphicsQueue)),
-            "Failed to create graphics command queue.");
+        ThrowIfFailed(m_Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_GraphicsQueue)),
+                      "Failed to create graphics command queue.");
 
         m_GraphicsQueue->SetName(L"WaveRender Graphics Queue");
     }
@@ -151,15 +161,10 @@ namespace Wave
 
         Microsoft::WRL::ComPtr<IDXGISwapChain1> swapChain;
 
-        ThrowIfFailed(
-            m_Factory->CreateSwapChainForHwnd(
-                m_GraphicsQueue.Get(),
-                static_cast<HWND>(m_Window.GetNativeHandle()),
-                &swapChainDesc,
-                nullptr,
-                nullptr,
-                &swapChain),
-            "Failed to create swap chain.");
+        ThrowIfFailed(m_Factory->CreateSwapChainForHwnd(m_GraphicsQueue.Get(),
+                                                        static_cast<HWND>(m_Window.GetNativeHandle()), &swapChainDesc,
+                                                        nullptr, nullptr, &swapChain),
+                      "Failed to create swap chain.");
 
         ThrowIfFailed(
             m_Factory->MakeWindowAssociation(static_cast<HWND>(m_Window.GetNativeHandle()), DXGI_MWA_NO_ALT_ENTER),
@@ -172,34 +177,24 @@ namespace Wave
 
     void D3D12Renderer::CreateRenderTargets()
     {
-        m_RtvAllocator.Initialize(
-            m_Device.Get(),
-            D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-            SwapChainBufferCount);
+        m_RtvAllocator.Initialize(m_Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, SwapChainBufferCount);
 
         for (u32 i = 0; i < SwapChainBufferCount; ++i)
         {
             Microsoft::WRL::ComPtr<ID3D12Resource> backBuffer;
 
-            ThrowIfFailed(
-                m_SwapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer)),
-                "Failed to get swap chain back buffer.");
+            ThrowIfFailed(m_SwapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer)),
+                          "Failed to get swap chain back buffer.");
 
             GpuResourceDesc resourceDesc = {};
             resourceDesc.Usage = ResourceUsage::BackBuffer;
             resourceDesc.DebugName = L"WaveRender Back Buffer";
 
-            m_BackBuffers[i].Attach(
-                backBuffer,
-                D3D12_RESOURCE_STATE_PRESENT,
-                resourceDesc);
+            m_BackBuffers[i].Attach(backBuffer, D3D12_RESOURCE_STATE_PRESENT, resourceDesc);
 
             m_BackBufferRtvs[i] = m_RtvAllocator.Allocate();
 
-            m_Device->CreateRenderTargetView(
-                m_BackBuffers[i].Get(),
-                nullptr,
-                m_BackBufferRtvs[i].CpuHandle);
+            m_Device->CreateRenderTargetView(m_BackBuffers[i].Get(), nullptr, m_BackBufferRtvs[i].CpuHandle);
         }
     }
 
@@ -220,11 +215,8 @@ namespace Wave
         Microsoft::WRL::ComPtr<ID3DBlob> signatureBlob;
         Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
 
-        HRESULT serializeResult = D3D12SerializeRootSignature(
-            &rootSignatureDesc,
-            D3D_ROOT_SIGNATURE_VERSION_1,
-            &signatureBlob,
-            &errorBlob);
+        HRESULT serializeResult =
+            D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signatureBlob, &errorBlob);
 
         if (FAILED(serializeResult))
         {
@@ -233,19 +225,15 @@ namespace Wave
             if (errorBlob)
             {
                 errorMessage += " ";
-                errorMessage += static_cast<const char*>(errorBlob->GetBufferPointer());
+                errorMessage += static_cast<const char *>(errorBlob->GetBufferPointer());
             }
 
             ThrowIfFailed(serializeResult, errorMessage.c_str());
         }
 
-        ThrowIfFailed(
-            m_Device->CreateRootSignature(
-                0,
-                signatureBlob->GetBufferPointer(),
-                signatureBlob->GetBufferSize(),
-                IID_PPV_ARGS(&m_RootSignature)),
-            "Failed to create root signature.");
+        ThrowIfFailed(m_Device->CreateRootSignature(0, signatureBlob->GetBufferPointer(),
+                                                    signatureBlob->GetBufferSize(), IID_PPV_ARGS(&m_RootSignature)),
+                      "Failed to create root signature.");
 
         m_RootSignature->SetName(L"WaveRender Empty Root Signature");
 
@@ -290,7 +278,27 @@ namespace Wave
         pipelineDesc.SampleMask = UINT_MAX;
         pipelineDesc.RasterizerState = rasterizerDesc;
         pipelineDesc.DepthStencilState = depthStencilDesc;
-        pipelineDesc.InputLayout = {};
+        D3D12_INPUT_ELEMENT_DESC inputElements[] = {
+            {
+                "POSITION",
+                0,
+                DXGI_FORMAT_R32G32B32_FLOAT,
+                0,
+                static_cast<UINT>(offsetof(TriangleVertex, Position)),
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+                0,
+            },
+            {
+                "COLOR",
+                0,
+                DXGI_FORMAT_R32G32B32_FLOAT,
+                0,
+                static_cast<UINT>(offsetof(TriangleVertex, Color)),
+                D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+                0,
+            },
+        };
+        pipelineDesc.InputLayout = {inputElements, _countof(inputElements)};
         pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         pipelineDesc.NumRenderTargets = 1;
         pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -298,9 +306,8 @@ namespace Wave
         pipelineDesc.SampleDesc.Count = 1;
         pipelineDesc.SampleDesc.Quality = 0;
 
-        ThrowIfFailed(
-            m_Device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_PipelineState)),
-            "Failed to create graphics pipeline state.");
+        ThrowIfFailed(m_Device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_PipelineState)),
+                      "Failed to create graphics pipeline state.");
 
         m_PipelineState->SetName(L"WaveRender Triangle PSO");
 
@@ -321,18 +328,14 @@ namespace Wave
 
     void D3D12Renderer::CreateCommandObjects()
     {
-        m_GraphicsContext.Initialize(
-            m_Device.Get(),
-            D3D12_COMMAND_LIST_TYPE_DIRECT,
-            SwapChainBufferCount,
-            L"WaveRender Graphics Command List");
+        m_GraphicsContext.Initialize(m_Device.Get(), D3D12_COMMAND_LIST_TYPE_DIRECT, SwapChainBufferCount,
+                                     L"WaveRender Graphics Command List");
     }
 
     void D3D12Renderer::CreateSyncObjects()
     {
-        ThrowIfFailed(
-            m_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_Fence)),
-            "Failed to create fence.");
+        ThrowIfFailed(m_Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_Fence)),
+                      "Failed to create fence.");
 
         m_FenceValues[m_FrameIndex] = 1;
 
@@ -344,15 +347,65 @@ namespace Wave
         }
     }
 
+    void D3D12Renderer::CreateSceneResources()
+    {
+        const TriangleVertex vertices[] = {
+            {{0.0f, 0.5f, 0.0f}, {1.0f, 0.15f, 0.15f}},
+            {{0.5f, -0.5f, 0.0f}, {0.15f, 1.0f, 0.15f}},
+            {{-0.5f, -0.5f, 0.0f}, {0.15f, 0.35f, 1.0f}},
+        };
+
+        const u64 vertexBufferSize = sizeof(vertices);
+
+        BufferDesc vertexBufferDesc = {};
+        vertexBufferDesc.Usage = BufferUsage::Vertex;
+        vertexBufferDesc.SizeInBytes = vertexBufferSize;
+        vertexBufferDesc.StrideInBytes = sizeof(TriangleVertex);
+        vertexBufferDesc.DebugName = L"Triangle Vertex Buffer";
+
+        m_TriangleVertexBuffer.Create(m_Device.Get(), vertexBufferDesc, D3D12_HEAP_TYPE_DEFAULT,
+                                      D3D12_RESOURCE_STATE_COPY_DEST);
+
+        BufferDesc uploadBufferDesc = {};
+        uploadBufferDesc.Usage = BufferUsage::Upload;
+        uploadBufferDesc.SizeInBytes = vertexBufferSize;
+        uploadBufferDesc.StrideInBytes = sizeof(TriangleVertex);
+        uploadBufferDesc.DebugName = L"Triangle Vertex Upload Buffer";
+
+        m_TriangleVertexUploadBuffer.Create(m_Device.Get(), uploadBufferDesc, D3D12_HEAP_TYPE_UPLOAD,
+                                            D3D12_RESOURCE_STATE_GENERIC_READ);
+
+        m_TriangleVertexUploadBuffer.UploadData(vertices, vertexBufferSize);
+
+        m_GraphicsContext.Reset(m_FrameIndex);
+
+        m_GraphicsContext.CopyBuffer(m_TriangleVertexBuffer.GetResource(), m_TriangleVertexUploadBuffer.GetResource(),
+                                     vertexBufferSize);
+
+        m_GraphicsContext.TransitionResource(m_TriangleVertexBuffer.GetResource(), D3D12_RESOURCE_STATE_COPY_DEST,
+                                             D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+        m_TriangleVertexBuffer.SetState(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+        m_GraphicsContext.Close();
+
+        ID3D12CommandList *commandLists[] = {m_GraphicsContext.GetCommandList()};
+        m_GraphicsQueue->ExecuteCommandLists(1, commandLists);
+
+        WaitForGpu();
+
+        m_TriangleVertexBufferView = m_TriangleVertexBuffer.GetVertexBufferView();
+
+        Log::Info("Scene GPU resources created.");
+    }
+
     Microsoft::WRL::ComPtr<IDXGIAdapter1> D3D12Renderer::SelectHardwareAdapter() const
     {
         Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
 
         for (u32 adapterIndex = 0;
-             m_Factory->EnumAdapterByGpuPreference(
-                 adapterIndex,
-                 DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-                 IID_PPV_ARGS(&adapter)) != DXGI_ERROR_NOT_FOUND;
+             m_Factory->EnumAdapterByGpuPreference(adapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                                                   IID_PPV_ARGS(&adapter)) != DXGI_ERROR_NOT_FOUND;
              ++adapterIndex)
         {
             DXGI_ADAPTER_DESC1 desc = {};
@@ -379,7 +432,7 @@ namespace Wave
 
     void D3D12Renderer::TransitionCurrentBackBuffer(D3D12_RESOURCE_STATES after)
     {
-        D3D12GpuResource& backBuffer = m_BackBuffers[m_FrameIndex];
+        D3D12GpuResource &backBuffer = m_BackBuffers[m_FrameIndex];
         const D3D12_RESOURCE_STATES before = backBuffer.GetState();
 
         m_GraphicsContext.TransitionResource(backBuffer.Get(), before, after);
@@ -390,17 +443,14 @@ namespace Wave
     {
         const u64 currentFenceValue = m_FenceValues[m_FrameIndex];
 
-        ThrowIfFailed(
-            m_GraphicsQueue->Signal(m_Fence.Get(), currentFenceValue),
-            "Failed to signal fence.");
+        ThrowIfFailed(m_GraphicsQueue->Signal(m_Fence.Get(), currentFenceValue), "Failed to signal fence.");
 
         m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
 
         if (m_Fence->GetCompletedValue() < m_FenceValues[m_FrameIndex])
         {
-            ThrowIfFailed(
-                m_Fence->SetEventOnCompletion(m_FenceValues[m_FrameIndex], m_FenceEvent),
-                "Failed to set fence completion event.");
+            ThrowIfFailed(m_Fence->SetEventOnCompletion(m_FenceValues[m_FrameIndex], m_FenceEvent),
+                          "Failed to set fence completion event.");
 
             WaitForSingleObject(m_FenceEvent, INFINITE);
         }
@@ -417,16 +467,13 @@ namespace Wave
 
         const u64 fenceValue = m_FenceValues[m_FrameIndex];
 
-        ThrowIfFailed(
-            m_GraphicsQueue->Signal(m_Fence.Get(), fenceValue),
-            "Failed to signal fence during GPU wait.");
+        ThrowIfFailed(m_GraphicsQueue->Signal(m_Fence.Get(), fenceValue), "Failed to signal fence during GPU wait.");
 
-        ThrowIfFailed(
-            m_Fence->SetEventOnCompletion(fenceValue, m_FenceEvent),
-            "Failed to set fence event during GPU wait.");
+        ThrowIfFailed(m_Fence->SetEventOnCompletion(fenceValue, m_FenceEvent),
+                      "Failed to set fence event during GPU wait.");
 
         WaitForSingleObject(m_FenceEvent, INFINITE);
 
         ++m_FenceValues[m_FrameIndex];
     }
-}
+} // namespace Wave

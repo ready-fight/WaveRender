@@ -79,6 +79,19 @@ namespace Wave
         m_CommandList->ResourceBarrier(1, &barrier);
     }
 
+    void D3D12CommandContext::CopyBuffer(
+        ID3D12Resource* destination,
+        ID3D12Resource* source,
+        u64 sizeInBytes)
+    {
+        m_CommandList->CopyBufferRegion(
+            destination,
+            0,
+            source,
+            0,
+            sizeInBytes);
+    }
+
     ID3D12GraphicsCommandList* D3D12CommandContext::GetCommandList() const
     {
         return m_CommandList.Get();

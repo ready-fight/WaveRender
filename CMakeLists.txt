@@ -22,6 +22,9 @@ add_executable(WaveRender
     src/Engine/Renderer/Renderer.hpp
     src/Engine/Renderer/RenderTypes.hpp
     src/Engine/Renderer/GpuResource.hpp
+    src/Engine/Renderer/Buffer.hpp
+    src/Engine/Renderer/D3D12/D3D12Buffer.cpp
+    src/Engine/Renderer/D3D12/D3D12Buffer.hpp
     src/Engine/Renderer/D3D12/D3D12Common.hpp
     src/Engine/Renderer/D3D12/D3D12CommandContext.cpp
     src/Engine/Renderer/D3D12/D3D12CommandContext.hpp

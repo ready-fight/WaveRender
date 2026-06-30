@@ -29,6 +29,11 @@ namespace Wave
             D3D12_RESOURCE_STATES before,
             D3D12_RESOURCE_STATES after);
 
+        void CopyBuffer(
+            ID3D12Resource* destination,
+            ID3D12Resource* source,
+            u64 sizeInBytes);
+
         ID3D12GraphicsCommandList* GetCommandList() const;
 
     private:
