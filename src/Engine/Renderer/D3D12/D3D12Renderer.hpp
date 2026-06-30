@@ -24,6 +24,7 @@ namespace Wave
         void CreateCommandQueue();
         void CreateSwapChain();
         void CreateRenderTargets();
+        void CreatePipelineObjects();
         void CreateCommandObjects();
         void CreateSyncObjects();
 
@@ -47,6 +48,12 @@ namespace Wave
         D3D12DescriptorAllocator m_RtvAllocator;
         std::array<D3D12DescriptorAllocation, SwapChainBufferCount> m_BackBufferRtvs = {};
         std::array<D3D12GpuResource, SwapChainBufferCount> m_BackBuffers = {};
+
+        Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RootSignature;
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> m_PipelineState;
+
+        D3D12_VIEWPORT m_Viewport = {};
+        D3D12_RECT m_ScissorRect = {};
 
         D3D12CommandContext m_GraphicsContext;
 

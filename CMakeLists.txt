@@ -12,6 +12,8 @@ add_executable(WaveRender
 
     src/Engine/Core/Application.cpp
     src/Engine/Core/Application.hpp
+    src/Engine/Core/FileSystem.cpp
+    src/Engine/Core/FileSystem.hpp
     src/Engine/Core/Log.cpp
     src/Engine/Core/Log.hpp
     src/Engine/Core/Types.hpp
@@ -45,6 +47,7 @@ target_compile_definitions(WaveRender PRIVATE
     NOMINMAX
     UNICODE
     _UNICODE
+    WAVE_SHADER_DIR="${WAVE_SHADER_OUTPUT_DIR}"
 )
 
 target_link_libraries(WaveRender PRIVATE

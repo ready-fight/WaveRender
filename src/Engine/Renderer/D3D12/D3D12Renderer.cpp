@@ -1,6 +1,14 @@
 #include "D3D12Renderer.hpp"
 
+#include "Engine/Core/FileSystem.hpp"
 #include "Engine/Core/Log.hpp"
+
+#include <filesystem>
+#include <string>
+
+#ifndef WAVE_SHADER_DIR
+#define WAVE_SHADER_DIR "shaders"
+#endif
 
 namespace Wave
 {
@@ -13,6 +21,7 @@ namespace Wave
         CreateCommandQueue();
         CreateSwapChain();
         CreateRenderTargets();
+        CreatePipelineObjects();
         CreateCommandObjects();
         CreateSyncObjects();
 
@@ -34,17 +43,24 @@ namespace Wave
 
     void D3D12Renderer::BeginFrame()
     {
-        m_GraphicsContext.Reset(m_FrameIndex);
+        m_GraphicsContext.Reset(m_FrameIndex, m_PipelineState.Get());
 
         TransitionCurrentBackBuffer(D3D12_RESOURCE_STATE_RENDER_TARGET);
 
         const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentBackBufferRtv();
         ID3D12GraphicsCommandList* commandList = m_GraphicsContext.GetCommandList();
 
+        commandList->RSSetViewports(1, &m_Viewport);
+        commandList->RSSetScissorRects(1, &m_ScissorRect);
+
         commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
         const float clearColor[] = {0.04f, 0.06f, 0.10f, 1.0f};
         commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
+        commandList->SetGraphicsRootSignature(m_RootSignature.Get());
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        commandList->DrawInstanced(3, 1, 0, 0);
     }
 
     void D3D12Renderer::EndFrame()
@@ -185,6 +201,122 @@ namespace Wave
                 nullptr,
                 m_BackBufferRtvs[i].CpuHandle);
         }
+    }
+
+    void D3D12Renderer::CreatePipelineObjects()
+    {
+        const std::filesystem::path shaderDir = WAVE_SHADER_DIR;
+
+        const std::vector<u8> vertexShader = FileSystem::ReadBinaryFile(shaderDir / "TriangleVS.cso");
+        const std::vector<u8> pixelShader = FileSystem::ReadBinaryFile(shaderDir / "TrianglePS.cso");
+
+        D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
+        rootSignatureDesc.NumParameters = 0;
+        rootSignatureDesc.pParameters = nullptr;
+        rootSignatureDesc.NumStaticSamplers = 0;
+        rootSignatureDesc.pStaticSamplers = nullptr;
+        rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+        Microsoft::WRL::ComPtr<ID3DBlob> signatureBlob;
+        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+
+        HRESULT serializeResult = D3D12SerializeRootSignature(
+            &rootSignatureDesc,
+            D3D_ROOT_SIGNATURE_VERSION_1,
+            &signatureBlob,
+            &errorBlob);
+
+        if (FAILED(serializeResult))
+        {
+            std::string errorMessage = "Failed to serialize root signature.";
+
+            if (errorBlob)
+            {
+                errorMessage += " ";
+                errorMessage += static_cast<const char*>(errorBlob->GetBufferPointer());
+            }
+
+            ThrowIfFailed(serializeResult, errorMessage.c_str());
+        }
+
+        ThrowIfFailed(
+            m_Device->CreateRootSignature(
+                0,
+                signatureBlob->GetBufferPointer(),
+                signatureBlob->GetBufferSize(),
+                IID_PPV_ARGS(&m_RootSignature)),
+            "Failed to create root signature.");
+
+        m_RootSignature->SetName(L"WaveRender Empty Root Signature");
+
+        D3D12_RASTERIZER_DESC rasterizerDesc = {};
+        rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+        rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
+        rasterizerDesc.FrontCounterClockwise = FALSE;
+        rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+        rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+        rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+        rasterizerDesc.DepthClipEnable = TRUE;
+        rasterizerDesc.MultisampleEnable = FALSE;
+        rasterizerDesc.AntialiasedLineEnable = FALSE;
+        rasterizerDesc.ForcedSampleCount = 0;
+        rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+        D3D12_BLEND_DESC blendDesc = {};
+        blendDesc.AlphaToCoverageEnable = FALSE;
+        blendDesc.IndependentBlendEnable = FALSE;
+        blendDesc.RenderTarget[0].BlendEnable = FALSE;
+        blendDesc.RenderTarget[0].LogicOpEnable = FALSE;
+        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO;
+        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        blendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
+        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+        D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
+        depthStencilDesc.DepthEnable = FALSE;
+        depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        depthStencilDesc.StencilEnable = FALSE;
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = {};
+        pipelineDesc.pRootSignature = m_RootSignature.Get();
+        pipelineDesc.VS = {vertexShader.data(), vertexShader.size()};
+        pipelineDesc.PS = {pixelShader.data(), pixelShader.size()};
+        pipelineDesc.BlendState = blendDesc;
+        pipelineDesc.SampleMask = UINT_MAX;
+        pipelineDesc.RasterizerState = rasterizerDesc;
+        pipelineDesc.DepthStencilState = depthStencilDesc;
+        pipelineDesc.InputLayout = {};
+        pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        pipelineDesc.NumRenderTargets = 1;
+        pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        pipelineDesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
+        pipelineDesc.SampleDesc.Count = 1;
+        pipelineDesc.SampleDesc.Quality = 0;
+
+        ThrowIfFailed(
+            m_Device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_PipelineState)),
+            "Failed to create graphics pipeline state.");
+
+        m_PipelineState->SetName(L"WaveRender Triangle PSO");
+
+        m_Viewport.TopLeftX = 0.0f;
+        m_Viewport.TopLeftY = 0.0f;
+        m_Viewport.Width = static_cast<float>(m_Settings.BackBufferWidth);
+        m_Viewport.Height = static_cast<float>(m_Settings.BackBufferHeight);
+        m_Viewport.MinDepth = 0.0f;
+        m_Viewport.MaxDepth = 1.0f;
+
+        m_ScissorRect.left = 0;
+        m_ScissorRect.top = 0;
+        m_ScissorRect.right = static_cast<LONG>(m_Settings.BackBufferWidth);
+        m_ScissorRect.bottom = static_cast<LONG>(m_Settings.BackBufferHeight);
+
+        Log::Info("Triangle graphics pipeline created.");
     }
 
     void D3D12Renderer::CreateCommandObjects()
