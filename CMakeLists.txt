@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(WaveRender LANGUAGES CXX)
+include(cmake/ShaderCompile.cmake)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,6 +53,30 @@ target_link_libraries(WaveRender PRIVATE
     dxgi
     dxguid
 )
+
+wave_add_hlsl_shader(
+    WaveShader_TriangleVS
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/Triangle.hlsl"
+    VSMain
+    vs_6_0
+    TriangleVS
+)
+
+wave_add_hlsl_shader(
+    WaveShader_TrianglePS
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/Triangle.hlsl"
+    PSMain
+    ps_6_0
+    TrianglePS
+)
+
+add_custom_target(WaveShaders
+    DEPENDS
+        WaveShader_TriangleVS
+        WaveShader_TrianglePS
+)
+
+add_dependencies(WaveRender WaveShaders)
 
 if(MSVC)
     target_compile_options(WaveRender PRIVATE
